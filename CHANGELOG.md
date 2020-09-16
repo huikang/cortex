@@ -2,6 +2,8 @@
 
 ## master / unreleased
 
+* [ENHANCEMENT] Smooth out spikes in rate of chunk flush operations. #3191
+
 ## 1.4.0-rc.0 in progress
 
 * [CHANGE] Cassandra backend support is now GA (stable). #3180
