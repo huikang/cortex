@@ -424,7 +424,7 @@ func TestIngesterSpreadFlush(t *testing.T) {
 	_, _ = pushTestSamples(t, ing, 4, 1, int(cfg.MaxChunkAge.Seconds()-1)*1000)
 
 	// wait beyond flush time so first set of samples should be sent to store
-	time.Sleep(cfg.FlushCheckPeriod * 2)
+	time.Sleep(cfg.FlushCheckPeriod * 4)
 
 	// check the first set of samples has been sent to the store
 	store.checkData(t, userIDs, testData)
