@@ -46,6 +46,58 @@ var (
 	ctx     = user.InjectOrgID(context.Background(), "user")
 )
 
+func TestConfig_Validate(t *testing.T) {
+	tests := map[string]struct {
+		initConfig func(*Config)
+		initLimits func(*validation.Limits)
+		expected   error
+	}{
+		"default config should pass": {
+			initConfig: func(_ *Config) {},
+			initLimits: func(_ *validation.Limits) {},
+			expected:   nil,
+		},
+		"should fail on invalid sharding strategy": {
+			initConfig: func(cfg *Config) {
+				cfg.ShardingStrategy = "xxx"
+			},
+			initLimits: func(_ *validation.Limits) {},
+			expected:   errInvalidShardingStrategy,
+		},
+		"should fail if the default shard size is 0 on when sharding strategy = shuffle-sharding": {
+			initConfig: func(cfg *Config) {
+				cfg.ShardingStrategy = "shuffle-sharding"
+			},
+			initLimits: func(limits *validation.Limits) {
+				limits.IngestionTenantShardSize = 0
+			},
+			expected: errInvalidTenantShardSize,
+		},
+		"should pass if the default shard size > 0 on when sharding strategy = shuffle-sharding": {
+			initConfig: func(cfg *Config) {
+				cfg.ShardingStrategy = "shuffle-sharding"
+			},
+			initLimits: func(limits *validation.Limits) {
+				limits.IngestionTenantShardSize = 3
+			},
+			expected: nil,
+		},
+	}
+
+	for testName, testData := range tests {
+		t.Run(testName, func(t *testing.T) {
+			cfg := Config{}
+			limits := validation.Limits{}
+			flagext.DefaultValues(&cfg, &limits)
+
+			testData.initConfig(&cfg)
+			testData.initLimits(&limits)
+
+			assert.Equal(t, testData.expected, cfg.Validate(limits))
+		})
+	}
+}
+
 func TestDistributor_Push(t *testing.T) {
 	// Metrics to assert on.
 	lastSeenTimestamp := "cortex_distributor_latest_seen_sample_timestamp_seconds"
@@ -911,7 +963,7 @@ func prepare(t *testing.T, cfg prepConfig) ([]*Distributor, []mockIngester, *rin
 		addr := fmt.Sprintf("%d", i)
 		ingesterDescs[addr] = ring.IngesterDesc{
 			Addr:      addr,
-			Zone:      addr,
+			Zone:      "",
 			State:     ring.ACTIVE,
 			Timestamp: time.Now().Unix(),
 			Tokens:    []uint32{uint32((math.MaxUint32 / cfg.numIngesters) * i)},

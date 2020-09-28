@@ -412,6 +412,93 @@ func (d *Desc) getTokens() []TokenDesc {
 	return tokens
 }
 
+// getTokensByZone returns instances tokens grouped by zone. Tokens within each zone
+// are guaranteed to be sorted.
+func (d *Desc) getTokensByZone() map[string][]TokenDesc {
+	zones := map[string][]TokenDesc{}
+
+	for key, ing := range d.Ingesters {
+		for _, token := range ing.Tokens {
+			zones[ing.Zone] = append(zones[ing.Zone], TokenDesc{Token: token, Ingester: key, Zone: ing.GetZone()})
+		}
+	}
+
+	// Ensure tokens are sorted within each zone.
+	for zone := range zones {
+		sort.Sort(ByToken(zones[zone]))
+	}
+
+	return zones
+}
+
+type CompareResult int
+
+const (
+	Equal                   CompareResult = iota // Both rings contain same instances, tokens, states and timestamps.
+	EqualInstancesAndTokens                      // Both rings contain the same instances and tokens, but states and timestamps differ.
+	Different                                    // Rings have different set of instances, or their information don't match.
+)
+
+// RingCompare compares this ring against another one and returns one of Equal, EqualInstancesAndTokens or Different.
+func (d *Desc) RingCompare(o *Desc) CompareResult {
+	if d == nil {
+		if o == nil || len(o.Ingesters) == 0 {
+			return Equal
+		}
+		return Different
+	}
+	if o == nil {
+		if len(d.Ingesters) == 0 {
+			return Equal
+		}
+		return Different
+	}
+
+	if len(d.Ingesters) != len(o.Ingesters) {
+		return Different
+	}
+
+	equalStatesAndTimestamps := true
+
+	for name, ing := range d.Ingesters {
+		oing, ok := o.Ingesters[name]
+		if !ok {
+			return Different
+		}
+
+		if ing.Addr != oing.Addr {
+			return Different
+		}
+
+		if ing.Zone != oing.Zone {
+			return Different
+		}
+
+		if len(ing.Tokens) != len(oing.Tokens) {
+			return Different
+		}
+
+		for ix, t := range ing.Tokens {
+			if oing.Tokens[ix] != t {
+				return Different
+			}
+		}
+
+		if ing.Timestamp != oing.Timestamp {
+			equalStatesAndTimestamps = false
+		}
+
+		if ing.State != oing.State {
+			equalStatesAndTimestamps = false
+		}
+	}
+
+	if equalStatesAndTimestamps {
+		return Equal
+	}
+	return EqualInstancesAndTokens
+}
+
 func GetOrCreateRingDesc(d interface{}) *Desc {
 	if d == nil {
 		return NewDesc()

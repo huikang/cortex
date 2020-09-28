@@ -86,7 +86,7 @@ The ingester query API was improved over time, but defaults to the old behaviour
     sum by (foo) (rate(bar{baz=”blip”,__cortex_shard__=”15of16”}[1m]))
    )
    ```
-   When enabled, the query-frontend requires a schema config to determine how/when to shard queries, either from a file or from flags (i.e. by the `config-yaml` CLI flag). This is the same schema config the queriers consume.
+   When enabled, the query-frontend requires a schema config to determine how/when to shard queries, either from a file or from flags (i.e. by the `-schema-config-file` CLI flag). This is the same schema config the queriers consume.
    It's also advised to increase downstream concurrency controls as well to account for more queries of smaller sizes:
 
    - `querier.max-outstanding-requests-per-tenant`
@@ -517,9 +517,9 @@ The DNS service discovery, inspired from Thanos DNS SD, supports different disco
 - **`dns+`**<br />
   The domain name after the prefix is looked up as an A/AAAA query. For example: `dns+memcached.local:11211`
 - **`dnssrv+`**<br />
-  The domain name after the prefix is looked up as a SRV query, and then each SRV record is resolved as an A/AAAA record. For example: `dnssrv+memcached.namespace.svc.cluster.local`
+  The domain name after the prefix is looked up as a SRV query, and then each SRV record is resolved as an A/AAAA record. For example: `dnssrv+_memcached._tcp.memcached.namespace.svc.cluster.local`
 - **`dnssrvnoa+`**<br />
-  The domain name after the prefix is looked up as a SRV query, with no A/AAAA lookup made after that. For example: `dnssrvnoa+memcached.namespace.svc.cluster.local`
+  The domain name after the prefix is looked up as a SRV query, with no A/AAAA lookup made after that. For example: `dnssrvnoa+_memcached._tcp.memcached.namespace.svc.cluster.local`
 
 ## Logging of IP of reverse proxy
 

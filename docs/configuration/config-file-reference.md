@@ -392,6 +392,10 @@ ha_tracker:
 # CLI flag: -distributor.extra-query-delay
 [extra_queue_delay: <duration> | default = 0s]
 
+# The sharding strategy to use. Supported values are: default, shuffle-sharding.
+# CLI flag: -distributor.sharding-strategy
+[sharding_strategy: <string> | default = "default"]
+
 # Distribute samples based on all labels, as opposed to solely by user and
 # metric name.
 # CLI flag: -distributor.shard-by-all-labels
@@ -519,6 +523,11 @@ lifecycler:
     # CLI flag: -distributor.replication-factor
     [replication_factor: <int> | default = 3]
 
+    # True to enable the zone-awareness and replicate ingested samples across
+    # different availability zones.
+    # CLI flag: -distributor.zone-awareness-enabled
+    [zone_awareness_enabled: <boolean> | default = false]
+
   # Number of tokens for each ingester.
   # CLI flag: -ingester.num-tokens
   [num_tokens: <int> | default = 128]
@@ -555,8 +564,7 @@ lifecycler:
   # CLI flag: -ingester.tokens-file-path
   [tokens_file_path: <string> | default = ""]
 
-  # The availability zone of the host, this instance is running on. Default is
-  # an empty string, which disables zone awareness for writes.
+  # The availability zone where this instance is running.
   # CLI flag: -ingester.availability-zone
   [availability_zone: <string> | default = ""]
 
@@ -613,6 +621,18 @@ lifecycler:
 # Period with which to update the per-user ingestion rates.
 # CLI flag: -ingester.rate-update-period
 [rate_update_period: <duration> | default = 15s]
+
+# Enable tracking of active series and export them as metrics.
+# CLI flag: -ingester.active-series-metrics-enabled
+[active_series_metrics_enabled: <boolean> | default = false]
+
+# How often to update active series metrics.
+# CLI flag: -ingester.active-series-metrics-update-period
+[active_series_metrics_update_period: <duration> | default = 1m]
+
+# After what time a series is considered to be inactive.
+# CLI flag: -ingester.active-series-metrics-idle-timeout
+[active_series_metrics_idle_timeout: <duration> | default = 10m]
 ```
 
 ### `querier_config`
@@ -796,6 +816,11 @@ results_cache:
     # The fifo_cache_config configures the local in-memory cache.
     # The CLI flags prefix for this block config is: frontend
     [fifocache: <fifo_cache_config>]
+
+  # Use compression in results cache. Supported values are: 'snappy' and ''
+  # (disable compression).
+  # CLI flag: -frontend.compression
+  [compression: <string> | default = ""]
 
 # Cache query results.
 # CLI flag: -querier.cache-results
@@ -2402,6 +2427,11 @@ The `frontend_worker_config` configures the worker - running within the Cortex q
 # CLI flag: -querier.dns-lookup-period
 [dns_lookup_duration: <duration> | default = 10s]
 
+# Querier ID, sent to frontend service to identify requests from the same
+# querier. Defaults to hostname.
+# CLI flag: -querier.id
+[id: <string> | default = ""]
+
 grpc_client_config:
   # gRPC client max receive message size (bytes).
   # CLI flag: -querier.frontend-client.grpc-max-recv-msg-size
@@ -2731,9 +2761,12 @@ The `limits_config` configures default and per-tenant limits imposed by Cortex s
 # CLI flag: -validation.enforce-metric-name
 [enforce_metric_name: <boolean> | default = true]
 
-# Per-user subring to shard metrics to ingesters. 0 is disabled.
-# CLI flag: -experimental.distributor.user-subring-size
-[user_subring_size: <int> | default = 0]
+# The default tenant's shard size when the shuffle-sharding strategy is used.
+# Must be set both on ingesters and distributors. When this setting is specified
+# in the per-tenant overrides, a value of 0 disables shuffle sharding for the
+# tenant.
+# CLI flag: -distributor.ingestion-tenant-shard-size
+[ingestion_tenant_shard_size: <int> | default = 0]
 
 # The maximum number of series for which a query can fetch samples from each
 # ingester. This limit is enforced only in the ingesters (when querying samples
@@ -2818,6 +2851,15 @@ The `limits_config` configures default and per-tenant limits imposed by Cortex s
 # recent results that might still be in flux.
 # CLI flag: -frontend.max-cache-freshness
 [max_cache_freshness: <duration> | default = 1m]
+
+# Maximum number of queriers that can handle requests for a single user. If set
+# to 0 or value higher than number of available queriers, *all* queriers will
+# handle requests for the user. Each frontend will select the same set of
+# queriers for the same user (given that all queriers are connected to all
+# frontends). This option only works with queriers connecting to the
+# query-frontend, not when using downstream URL.
+# CLI flag: -frontend.max-queriers-per-user
+[max_queriers_per_user: <int> | default = 0]
 
 # Duration to delay the evaluation of rules to ensure the underlying metrics
 # have been pushed to Cortex.
@@ -2968,7 +3010,7 @@ The `memcached_client_config` configures the client used to connect to Memcached
 # Trip circuit-breaker after this number of consecutive dial failures (if zero
 # then circuit-breaker is disabled).
 # CLI flag: -<prefix>.memcached.circuit-breaker-consecutive-failures
-[circuit_breaker_consecutive_failures: <int> | default = 0]
+[circuit_breaker_consecutive_failures: <int> | default = 10]
 
 # Duration circuit-breaker remains open after tripping (if zero then 60 seconds
 # is used).
@@ -3622,13 +3664,23 @@ sharding_ring:
 
   # The replication factor to use when sharding blocks. This option needs be set
   # both on the store-gateway and querier when running in microservices mode.
-  # CLI flag: -store-gateway.replication-factor
+  # CLI flag: -store-gateway.sharding-ring.replication-factor
   [replication_factor: <int> | default = 3]
 
   # File path where tokens are stored. If empty, tokens are not stored at
   # shutdown and restored at startup.
-  # CLI flag: -store-gateway.tokens-file-path
+  # CLI flag: -store-gateway.sharding-ring.tokens-file-path
   [tokens_file_path: <string> | default = ""]
+
+  # True to enable zone-awareness and replicate blocks across different
+  # availability zones.
+  # CLI flag: -store-gateway.sharding-ring.zone-awareness-enabled
+  [zone_awareness_enabled: <boolean> | default = false]
+
+  # The availability zone where this instance is running. Required if
+  # zone-awareness is enabled.
+  # CLI flag: -store-gateway.sharding-ring.instance-availability-zone
+  [instance_availability_zone: <string> | default = ""]
 
 # The sharding strategy to use. Supported values are: default, shuffle-sharding.
 # CLI flag: -store-gateway.sharding-strategy

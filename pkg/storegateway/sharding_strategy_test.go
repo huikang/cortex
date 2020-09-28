@@ -35,9 +35,10 @@ func TestDefaultShardingStrategy(t *testing.T) {
 	block4Hash := cortex_tsdb.HashBlockID(block4)
 
 	tests := map[string]struct {
-		replicationFactor int
-		setupRing         func(*ring.Desc)
-		expectedBlocks    map[string][]ulid.ULID
+		replicationFactor    int
+		zoneAwarenessEnabled bool
+		setupRing            func(*ring.Desc)
+		expectedBlocks       map[string][]ulid.ULID
 	}{
 		"one ACTIVE instance in the ring with replication factor = 1": {
 			replicationFactor: 1,
@@ -92,6 +93,20 @@ func TestDefaultShardingStrategy(t *testing.T) {
 				"127.0.0.1": {block1, block3 /* replicated: */, block2, block4},
 				"127.0.0.2": {block2 /* replicated: */, block1},
 				"127.0.0.3": {block4 /* replicated: */, block3},
+			},
+		},
+		"multiple ACTIVE instances in the ring with replication factor = 2 and zone-awareness enabled": {
+			replicationFactor:    2,
+			zoneAwarenessEnabled: true,
+			setupRing: func(r *ring.Desc) {
+				r.AddIngester("instance-1", "127.0.0.1", "zone-a", []uint32{block1Hash + 1, block3Hash + 1}, ring.ACTIVE)
+				r.AddIngester("instance-2", "127.0.0.2", "zone-a", []uint32{block2Hash + 1}, ring.ACTIVE)
+				r.AddIngester("instance-3", "127.0.0.3", "zone-b", []uint32{block4Hash + 1}, ring.ACTIVE)
+			},
+			expectedBlocks: map[string][]ulid.ULID{
+				"127.0.0.1": {block1, block3, block4},
+				"127.0.0.2": {block2},
+				"127.0.0.3": {block1, block2, block3, block4},
 			},
 		},
 		"one unhealthy instance in the ring with replication factor = 1": {
@@ -235,8 +250,9 @@ func TestDefaultShardingStrategy(t *testing.T) {
 			}))
 
 			cfg := ring.Config{
-				ReplicationFactor: testData.replicationFactor,
-				HeartbeatTimeout:  time.Minute,
+				ReplicationFactor:    testData.replicationFactor,
+				HeartbeatTimeout:     time.Minute,
+				ZoneAwarenessEnabled: testData.zoneAwarenessEnabled,
 			}
 
 			r, err := ring.NewWithStoreClientAndStrategy(cfg, "test", "test", store, &BlocksReplicationStrategy{})
@@ -291,10 +307,7 @@ func TestShuffleShardingStrategy(t *testing.T) {
 	block3Hash := cortex_tsdb.HashBlockID(block3)
 	block4Hash := cortex_tsdb.HashBlockID(block4)
 
-	// Ensure the user ID we use belongs to the instances holding the token for the block 1
-	// (it's expected by the assertions below).
 	userID := "user-A"
-	require.LessOrEqual(t, cortex_tsdb.HashTenantID(userID), block1Hash)
 
 	type usersExpectation struct {
 		instanceID   string
@@ -499,24 +512,24 @@ func TestShuffleShardingStrategy(t *testing.T) {
 			limits:            &shardingLimitsMock{storeGatewayTenantShardSize: 2},
 			setupRing: func(r *ring.Desc) {
 				r.AddIngester("instance-1", "127.0.0.1", "", []uint32{block1Hash + 1, block4Hash + 1}, ring.ACTIVE)
-				r.AddIngester("instance-3", "127.0.0.3", "", []uint32{block3Hash + 1}, ring.ACTIVE)
+				r.AddIngester("instance-2", "127.0.0.2", "", []uint32{block2Hash + 1}, ring.ACTIVE)
 
-				r.Ingesters["instance-2"] = ring.IngesterDesc{
-					Addr:      "127.0.0.2",
+				r.Ingesters["instance-3"] = ring.IngesterDesc{
+					Addr:      "127.0.0.3",
 					Timestamp: time.Now().Add(-time.Hour).Unix(),
 					State:     ring.ACTIVE,
-					Tokens:    []uint32{block2Hash + 1},
+					Tokens:    []uint32{block3Hash + 1},
 				}
 			},
 			expectedUsers: []usersExpectation{
 				{instanceID: "instance-1", instanceAddr: "127.0.0.1", users: []string{userID}},
-				{instanceID: "instance-2", instanceAddr: "127.0.0.2", users: []string{userID}},
-				{instanceID: "instance-3", instanceAddr: "127.0.0.3", users: nil},
+				{instanceID: "instance-2", instanceAddr: "127.0.0.2", users: nil},
+				{instanceID: "instance-3", instanceAddr: "127.0.0.3", users: []string{userID}},
 			},
 			expectedBlocks: []blocksExpectation{
 				{instanceID: "instance-1", instanceAddr: "127.0.0.1", blocks: []ulid.ULID{block1, block2, block3, block4}},
-				{instanceID: "instance-2", instanceAddr: "127.0.0.2", blocks: []ulid.ULID{ /* no blocks because unhealthy */ }},
-				{instanceID: "instance-3", instanceAddr: "127.0.0.3", blocks: []ulid.ULID{ /* no blocks because not belonging to the shard */ }},
+				{instanceID: "instance-2", instanceAddr: "127.0.0.2", blocks: []ulid.ULID{ /* no blocks because not belonging to the shard */ }},
+				{instanceID: "instance-3", instanceAddr: "127.0.0.3", blocks: []ulid.ULID{ /* no blocks because unhealthy */ }},
 			},
 		},
 		"LEAVING instance in the ring should continue to keep its shard blocks but they should also be replicated to another instance": {
@@ -524,18 +537,18 @@ func TestShuffleShardingStrategy(t *testing.T) {
 			limits:            &shardingLimitsMock{storeGatewayTenantShardSize: 2},
 			setupRing: func(r *ring.Desc) {
 				r.AddIngester("instance-1", "127.0.0.1", "", []uint32{block1Hash + 1, block3Hash + 1}, ring.ACTIVE)
-				r.AddIngester("instance-2", "127.0.0.2", "", []uint32{block2Hash + 1}, ring.LEAVING)
-				r.AddIngester("instance-3", "127.0.0.3", "", []uint32{block4Hash + 1}, ring.ACTIVE)
+				r.AddIngester("instance-2", "127.0.0.2", "", []uint32{block2Hash + 1}, ring.ACTIVE)
+				r.AddIngester("instance-3", "127.0.0.3", "", []uint32{block4Hash + 1}, ring.LEAVING)
 			},
 			expectedUsers: []usersExpectation{
 				{instanceID: "instance-1", instanceAddr: "127.0.0.1", users: []string{userID}},
-				{instanceID: "instance-2", instanceAddr: "127.0.0.2", users: []string{userID}},
-				{instanceID: "instance-3", instanceAddr: "127.0.0.3", users: nil},
+				{instanceID: "instance-2", instanceAddr: "127.0.0.2", users: nil},
+				{instanceID: "instance-3", instanceAddr: "127.0.0.3", users: []string{userID}},
 			},
 			expectedBlocks: []blocksExpectation{
-				{instanceID: "instance-1", instanceAddr: "127.0.0.1", blocks: []ulid.ULID{block1, block3, block4 /* replicated: */, block2}},
-				{instanceID: "instance-2", instanceAddr: "127.0.0.2", blocks: []ulid.ULID{block2}},
-				{instanceID: "instance-3", instanceAddr: "127.0.0.3", blocks: []ulid.ULID{ /* no blocks because not belonging to the shard */ }},
+				{instanceID: "instance-1", instanceAddr: "127.0.0.1", blocks: []ulid.ULID{block1, block2, block3 /* replicated: */, block4}},
+				{instanceID: "instance-2", instanceAddr: "127.0.0.2", blocks: []ulid.ULID{ /* no blocks because not belonging to the shard */ }},
+				{instanceID: "instance-3", instanceAddr: "127.0.0.3", blocks: []ulid.ULID{block4}},
 			},
 		},
 		"JOINING instance in the ring should get its shard blocks but they should also be replicated to another instance": {
@@ -543,18 +556,18 @@ func TestShuffleShardingStrategy(t *testing.T) {
 			limits:            &shardingLimitsMock{storeGatewayTenantShardSize: 2},
 			setupRing: func(r *ring.Desc) {
 				r.AddIngester("instance-1", "127.0.0.1", "", []uint32{block1Hash + 1, block3Hash + 1}, ring.ACTIVE)
-				r.AddIngester("instance-2", "127.0.0.2", "", []uint32{block2Hash + 1}, ring.JOINING)
-				r.AddIngester("instance-3", "127.0.0.3", "", []uint32{block4Hash + 1}, ring.ACTIVE)
+				r.AddIngester("instance-2", "127.0.0.2", "", []uint32{block2Hash + 1}, ring.ACTIVE)
+				r.AddIngester("instance-3", "127.0.0.3", "", []uint32{block4Hash + 1}, ring.JOINING)
 			},
 			expectedUsers: []usersExpectation{
 				{instanceID: "instance-1", instanceAddr: "127.0.0.1", users: []string{userID}},
-				{instanceID: "instance-2", instanceAddr: "127.0.0.2", users: []string{userID}},
-				{instanceID: "instance-3", instanceAddr: "127.0.0.3", users: nil},
+				{instanceID: "instance-2", instanceAddr: "127.0.0.2", users: nil},
+				{instanceID: "instance-3", instanceAddr: "127.0.0.3", users: []string{userID}},
 			},
 			expectedBlocks: []blocksExpectation{
-				{instanceID: "instance-1", instanceAddr: "127.0.0.1", blocks: []ulid.ULID{block1, block3, block4 /* replicated: */, block2}},
-				{instanceID: "instance-2", instanceAddr: "127.0.0.2", blocks: []ulid.ULID{block2}},
-				{instanceID: "instance-3", instanceAddr: "127.0.0.3", blocks: []ulid.ULID{ /* no blocks because not belonging to the shard */ }},
+				{instanceID: "instance-1", instanceAddr: "127.0.0.1", blocks: []ulid.ULID{block1, block2, block3 /* replicated: */, block4}},
+				{instanceID: "instance-2", instanceAddr: "127.0.0.2", blocks: []ulid.ULID{ /* no blocks because not belonging to the shard */ }},
+				{instanceID: "instance-3", instanceAddr: "127.0.0.3", blocks: []ulid.ULID{block4}},
 			},
 		},
 		"SS = 0 disables shuffle sharding": {

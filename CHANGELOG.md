@@ -2,16 +2,72 @@
 
 ## master / unreleased
 
+* [CHANGE] Improved shuffle sharding support in the write path. This work introduced some config changes: #3090
+  * Introduced `-distributor.sharding-strategy` CLI flag (and its respective `sharding_strategy` YAML config option) to explicitly specify which sharding strategy should be used in the write path
+  * `-experimental.distributor.user-subring-size` flag renamed to `-distributor.ingestion-tenant-shard-size`
+  * `user_subring_size` limit YAML config option renamed to `ingestion_tenant_shard_size`
+* [CHANGE] Dropped "blank Alertmanager configuration; using fallback" message from Info to Debug level. #3205
+* [CHANGE] Zone-awareness replication for time-series now should be explicitly enabled in the distributor via the `-distributor.zone-awareness-enabled` CLI flag (or its respective YAML config option). Before, zone-aware replication was implicitly enabled if a zone was set on ingesters. #3200
+* [CHANGE] Removed the deprecated CLI flag `-config-yaml`. You should use `-schema-config-file` instead. #3225
+* [CHANGE] Enforced the HTTP method required by some API endpoints which did (incorrectly) allow any method before that. #3228
+  - `GET /`
+  - `GET /config`
+  - `GET /debug/fgprof`
+  - `GET /distributor/all_user_stats`
+  - `GET /distributor/ha_tracker`
+  - `GET /all_user_stats`
+  - `GET /ha-tracker`
+  - `GET /api/v1/user_stats`
+  - `GET /api/v1/chunks`
+  - `GET <legacy-http-prefix>/user_stats`
+  - `GET <legacy-http-prefix>/chunks`
+  - `GET /services`
+  - `GET /multitenant_alertmanager/status`
+  - `GET /status` (alertmanager microservice)
+  - `GET|POST /ingester/ring`
+  - `GET|POST /ring`
+  - `GET|POST /store-gateway/ring`
+  - `GET|POST /compactor/ring`
+  - `GET|POST /ingester/flush`
+  - `GET|POST /ingester/shutdown`
+  - `GET|POST /flush`
+  - `GET|POST /shutdown`
+  - `GET|POST /ruler/ring`
+  - `POST /api/v1/push`
+  - `POST <legacy-http-prefix>/push`
+  - `POST /push`
+  - `POST /ingester/push`
+* [FEATURE] Added support for shuffle-sharding queriers in the query-frontend. When configured (`-frontend.max-queriers-per-user` globally, or using per-user limit `max_queriers_per_user`), each user's requests will be handled by different set of queriers. #3113
+* [FEATURE] Query-frontend: added `compression` config to support results cache with compression. #3217
+* [ENHANCEMENT] Added `cortex_query_frontend_connected_clients` metric to show the number of workers currently connected to the frontend. #3207
+* [ENHANCEMENT] Shuffle sharding: improved shuffle sharding in the write path. Shuffle sharding now should be explicitly enabled via `-distributor.sharding-strategy` CLI flag (or its respective YAML config option) and guarantees stability, consistency, shuffling and balanced zone-awareness properties. #3090 #3214
+* [ENHANCEMENT] Ingester: added new metric `cortex_ingester_active_series` to track active series more accurately. Also added options to control whether active series tracking is enabled (`-ingester.active-series-enabled`, defaults to false), and how often this metric is updated (`-ingester.active-series-update-period`) and max idle time for series to be considered inactive (`-ingester.active-series-idle-timeout`). #3153
+* [ENHANCEMENT] Blocksconvert – Builder: download plan file locally before processing it. #3209
+* [ENHANCEMENT] Store-gateway: added zone-aware replication support to blocks replication in the store-gateway. #3200
+* [ENHANCEMENT] Store-gateway: exported new metrics. #3231
+  - `cortex_bucket_store_cached_series_fetch_duration_seconds`
+  - `cortex_bucket_store_cached_postings_fetch_duration_seconds`
+  - `cortex_bucket_stores_gate_queries_max`
+* [ENHANCEMENT] Added `-version` flag to Cortex. #3233
 * [ENHANCEMENT] Smooth out spikes in rate of chunk flush operations. #3191
+* [BUGFIX] No-longer-needed ingester operations for queries triggered by queriers and rulers are now canceled. #3178
+* [BUGFIX] Ruler: directories in the configured `rules-path` will be removed on startup and shutdown in order to ensure they don't persist between runs. #3195
+* [BUGFIX] Handle hash-collisions in the query path. #3192
+* [BUGFIX] Check for postgres rows errors. #3197
+* [BUGFIX] Ruler Experimental API: Don't allow rule groups without names or empty rule groups. #3210
+* [BUGFIX] Experimental Alertmanager API: Do not allow empty Alertmanager configurations or bad template filenames to be submitted through the configuration API. #3185
 
 ## 1.4.0-rc.0 in progress
 
+* [CHANGE] TLS configuration for gRPC, HTTP and etcd clients is now marked as experimental. These features are not yet fully baked, and we expect possible small breaking changes in Cortex 1.5. #3198
 * [CHANGE] Cassandra backend support is now GA (stable). #3180
-* [CHANGE] Blocks storage is now GA (stable). The `-experimental` prefix has been removed from all CLI flags related to the blocks storage (no YAML config changes). #3180
+* [CHANGE] Blocks storage is now GA (stable). The `-experimental` prefix has been removed from all CLI flags related to the blocks storage (no YAML config changes). #3180 #3201
   - `-experimental.blocks-storage.*` flags renamed to `-blocks-storage.*`
   - `-experimental.store-gateway.*` flags renamed to `-store-gateway.*`
   - `-experimental.querier.store-gateway-client.*` flags renamed to `-querier.store-gateway-client.*`
   - `-experimental.querier.store-gateway-addresses` flag renamed to `-querier.store-gateway-addresses`
+  - `-store-gateway.replication-factor` flag renamed to `-store-gateway.sharding-ring.replication-factor`
+  - `-store-gateway.tokens-file-path` flag renamed to `store-gateway.sharding-ring.tokens-file-path`
 * [CHANGE] Ingester: Removed deprecated untyped record from chunks WAL. Only if you are running `v1.0` or below, it is recommended to first upgrade to `v1.1`/`v1.2`/`v1.3` and run it for a day before upgrading to `v1.4` to avoid data loss. #3115
 * [CHANGE] Distributor API endpoints are no longer served unless target is set to `distributor` or `all`. #3112
 * [CHANGE] Increase the default Cassandra client replication factor to 3. #3007
@@ -51,7 +107,7 @@
 * [ENHANCEMENT] Add "integration" as a label for `cortex_alertmanager_notifications_total` and `cortex_alertmanager_notifications_failed_total` metrics. #3056
 * [ENHANCEMENT] Add `cortex_ruler_config_last_reload_successful` and `cortex_ruler_config_last_reload_successful_seconds` to check status of users rule manager. #3056
 * [ENHANCEMENT] The configuration validation now fails if an empty YAML node has been set for a root YAML config property. #3080
-* [ENHANCEMENT] Memcached dial() calls now have an optional circuit-breaker to avoid hammering a broken cache #3051
+* [ENHANCEMENT] Memcached dial() calls now have a circuit-breaker to avoid hammering a broken cache. #3051, #3189
 * [ENHANCEMENT] `-ruler.evaluation-delay-duration` is now overridable as a per-tenant limit, `ruler_evaluation_delay_duration`. #3098
 * [ENHANCEMENT] Add TLS support to etcd client. #3102
 * [ENHANCEMENT] When a tenant accesses the Alertmanager UI or its API, if we have valid `-alertmanager.configs.fallback` we'll use that to start the manager and avoid failing the request. #3073
